@@ -147,6 +147,8 @@ static int strace_child;
 static int strace_tracer_pid;
 
 static const char *username;
+static int cmdline_uid = -1;
+static int cmdline_gid = -1;
 static uid_t run_uid;
 static gid_t run_gid;
 
@@ -1475,8 +1477,11 @@ exec_or_die(void)
 		 * It is important to set groups before we
 		 * lose privileges on setuid.
 		 */
-		if (initgroups(username, run_gid) < 0) {
-			perror_msg_and_die("initgroups");
+		// TODO: provide a way to pass "setgroups()" data to avoid
+		// the initgroups() that requires libnss
+		if (cmdline_uid == -1 && cmdline_gid == -1)  {
+			if (initgroups(username, run_gid) < 0)
+				perror_msg_and_die("initgroups");
 		}
 		if (setregid(run_gid, params->run_egid) < 0) {
 			perror_msg_and_die("setregid");
@@ -2245,6 +2250,8 @@ init(int argc, char *argv[])
 		GETOPT_TS,
 		GETOPT_PIDNS_TRANSLATION,
 		GETOPT_TIPS,
+		GETOPT_UID,
+		GETOPT_GID,
 
 		GETOPT_QUAL_TRACE,
 		GETOPT_QUAL_ABBREV,
@@ -2292,6 +2299,8 @@ init(int argc, char *argv[])
 		{ "timestamps",		optional_argument, 0, GETOPT_TS },
 		{ "syscall-times",	optional_argument, 0, 'T' },
 		{ "user",		required_argument, 0, 'u' },
+		{ "uid",		required_argument, 0, GETOPT_UID },
+		{ "gid",		required_argument, 0, GETOPT_GID },
 		{ "summary-columns",	required_argument, 0, 'U' },
 		{ "no-abbrev",		no_argument,	   0, 'v' },
 		{ "version",		no_argument,	   0, 'V' },
@@ -2492,6 +2501,18 @@ init(int argc, char *argv[])
 			break;
 		case 'x':
 			xflag = MIN(xflag + 1, HEXSTR_ALL);
+			break;
+                case GETOPT_UID:
+                        i = string_to_uint(optarg);
+                        if (i < 0)
+                           error_opt_arg(c, lopt, optarg);
+                        cmdline_uid = i;
+			break;
+                case GETOPT_GID:
+                        i = string_to_uint(optarg);
+                        if (i < 0)
+                           error_opt_arg(c, lopt, optarg);
+                        cmdline_gid = i;
 			break;
 		case GETOPT_HEX_STR:
 			xflag_long = find_arg_val(optarg, xflag_str,
@@ -2784,7 +2805,10 @@ init(int argc, char *argv[])
 #endif
 
 	/* See if they want to run as another user. */
-	if (username != NULL) {
+        if (cmdline_uid > -1 && cmdline_gid > -1) {
+                run_uid = cmdline_uid;
+                run_gid = cmdline_gid;
+        } else if (username != NULL) {
 		struct passwd *pent;
 
 		if (getuid() != 0 || geteuid() != 0) {
